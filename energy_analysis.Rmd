@@ -38,7 +38,7 @@ Select the data for SiteID 1
 
 
 sub_format$Timestamp <- as.character(sub_format$Timestamp) %>% str_sub(., 1, str_length(.)-9)
-holidays$Holiday <- "TRUE"
+holidays$Holiday <- "True"
 colnames(holidays)[2] <- "Timestamp"
 holidays$Timestamp <- as.character(holidays$Timestamp)
 holidays2 <- holidays %>% select(c("Timestamp", "Holiday", "SiteId")) %>% distinct()
@@ -85,6 +85,11 @@ colnames(sunsubformat2)[8] <- "Closed"
 
 xmatrix <- rbind(msubformat2, tsubformat2, wsubformat2, thsubformat2, fsubformat2, ssubformat2, sunsubformat2)
 xmatrix <- as.data.frame(xmatrix)
+
+xmatrix$Closed <- paste(xmatrix[,2] ,xmatrix[,8])
+xmatrix$Closed <- plyr::mapvalues(xmatrix$Closed, from = c("NA False", "NA True", "True False"), to = c("False", "True", "True"))
+xmatrix$Holiday <- NULL
+
 
 write.csv(xmatrix, 'xmatrix.csv')
 ```
