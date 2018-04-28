@@ -172,5 +172,19 @@ model.c %>% evaluate(testX, testY)
 model.c %>% get_weights()
 plot(history)
 
-
-
+#linear model
+linear_trainx = trainX%>%as.data.frame()
+lm = lm(data = linear_trainx,Value~ .)
+lm%>%summary()
+linear_testx = testX%>%as.data.frame()
+linear_testy = testY%>%as.data.frame()
+prediction_testy <-predict(lm,linear_testx%>%select(-Value))%>%as.data.frame()
+mseTest<-mean((linear_testy- prediction_testy)^2)
+#mse is 2551249500.93015
+#glmnet
+lasso = glmnet(x = linear_trainx%>%select(-Value)%>%as.matrix(),y = linear_trainx%>%select(Value)%>%as.matrix(),family = "gaussian" )
+plot(lasso,xvar = c("lambda"),label = TRUE)
+#min lambda is 16.03655
+prediction_lasso_test <-predict(lasso,newx = linear_testx%>%select(-Value)%>%as.matrix(),s = c(16.03655),type = "response")
+mseTestLasso<-mean((prediction_lasso_test - linear_testy)^2)
+#mse is 2547857458.0636
