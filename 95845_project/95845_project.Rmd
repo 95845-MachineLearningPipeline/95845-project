@@ -1,0 +1,195 @@
+Load all the raw data
+```{r, quiet=T,message=F}
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(tcltk)
+library(glmnet)
+#loading training data such as timestamp and energy consumption value 
+hist_consumption = read.csv("train.csv")
+#loading building metadata such as closed information for Monday to Sunday
+building_meta = read.csv("metadata.csv")
+#loading outside temperature value 
+hist_weather = read.csv("weather.csv")
+```
+Join all the data together and filter out missing data
+```{r, quiet=T,message=F}
+building_2 <- hist_consumption %>% filter(SiteId == 2)
+building_2$Timestamp <- ymd_hms(building_2$Timestamp)
+
+building2_weather <- hist_weather %>% filter(SiteId == 2)
+building2_weather$Timestamp <- ymd_hms(building2_weather$Timestamp)
+
+building2.data <- building_2 %>% select(-ForecastId, -obs_id) %>%
+  left_join(building2_weather %>% select(-X, -SiteId), by = "Timestamp") %>%
+  filter(!is.na(Temperature)) %>%
+  group_by(SiteId, Timestamp, Value) %>%
+  summarise(OutsideTemperature = mean(Temperature))
+count = 0
+# data <- safe copy of building2.data
+# add ID for each row to building2.data to create data
+data <- building2.data %>% filter(!is.na(Value))
+data$ID <- seq.int(nrow(data))
+```
+Create function to clean the raw data
+```{r, quiet=T,message=F}
+days_3 <- 72
+days_2 <- 48
+days_1 <- 24
+hours_3 <- 3
+hours_2 <- 2
+hours_1 <- 1
+total <- 20000
+# create a progress bar
+pb <- tkProgressBar(title = "Data Cleaning Progress", min = 0,
+                    max = total, width = 300)
+
+preprocessData <- function(dat) {
+  data <-data.frame(index = integer(),
+                   Timestamp = as.POSIXct(factor()),
+                   T_72 = double(),
+                   T_48 = double(),
+                   T_24 = double(),
+                   T_3 = double(),
+                   T_2 = double(),
+                   T_1 = double(),
+                   T_0 = double(),
+                   Sun = integer(),
+                   Mon = integer(),
+                   Tue = integer(),
+                   Wed = integer(),
+                   Thu = integer(),
+                   Fri = integer(),
+                   Sat = integer(),
+                   Closed = integer(),
+                   OutsideTemperature = double(),
+                   Output = double(),
+                   ID = integer())
+  for (i in 1:nrow(dat)) {
+    if (i > days_3 && (i - days_3) <= total) {
+      realIndex <- i - days_3
+      data[realIndex, ]$index <- realIndex
+      data[realIndex, ]$Timestamp <- dat[i, ]$Timestamp
+      data[realIndex, ]$ID <- i
+      data[realIndex, ]$Output <- dat[i + 1, ]$Value
+      data[realIndex, ]$T_72 <- dat[i - days_3, ]$Value
+      data[realIndex, ]$T_48 <- dat[i - days_2, ]$Value
+      data[realIndex, ]$T_24 <- dat[i - days_1, ]$Value
+      data[realIndex, ]$T_1 <- dat[i - hours_1, ]$Value
+      data[realIndex, ]$T_2 <- dat[i - hours_2, ]$Value
+      data[realIndex, ]$T_3 <- dat[i - hours_3, ]$Value
+      data[realIndex, ]$T_0 <- dat[i, ]$Value
+      data[realIndex, ]$OutsideTemperature <- dat[i, ]$OutsideTemperature
+      
+      if (wday(dat[i, ]$Timestamp) == 1) {
+        data[realIndex, ]$Sun <- 1
+        data[realIndex, ]$Closed <- 1
+      } else if (wday(dat[i, ]$Timestamp) == 2) {
+        data[realIndex, ]$Mon <- 0
+        data[realIndex, ]$Closed <- 0
+      } else if (wday(dat[i, ]$Timestamp) == 3) {
+        data[realIndex, ]$Tue <- 1
+        data[realIndex, ]$Closed <- 0
+      } else if (wday(dat[i, ]$Timestamp) == 4) {
+        data[realIndex, ]$Wed <- 1
+        data[realIndex, ]$Closed <- 0
+      } else if (wday(dat[i, ]$Timestamp) == 5) {
+        data[realIndex, ]$Thu <- 1
+        data[realIndex, ]$Closed <- 0
+      } else if (wday(dat[i, ]$Timestamp) == 6) {
+        data[realIndex, ]$Fri <- 1
+        data[realIndex, ]$Closed <- 0
+      } else if (wday(dat[i, ]$Timestamp) == 7) {
+        data[realIndex, ]$Sat <- 1
+        data[realIndex, ]$Closed <- 1
+      }
+      setTkProgressBar(pb, i, label=paste(round((i - days_3)/total*100, 0)), "done")
+    }
+  }
+  data[is.na(data)] <- 0
+  close(pb)
+  return(data)
+}
+```
+Clean all the raw data and write all of it to a csv file
+```{r, quiet=T,message=F}
+# clean process
+cleanedData <- preprocessData(data)
+#write.csv(cleanedData, "cleanedData.csv")
+
+#data.cleaned <- read.csv("cleanedData.csv") %>% select(-X)
+data.cleaned <- cleanedData %>% select(-X)
+data.cleaned$Timestamp <- as.POSIXct(data.cleaned$Timestamp)
+```
+Create basis function to make daily energy consumption into 24 hour period 
+```{r, quiet=T,message=F}
+data.basis <- read.csv("basis_function_results.csv") %>% rename(index = Timestamp)
+data <- data.cleaned %>% right_join(data.basis, by="index") %>% filter(!is.na(T_0)) %>% filter(!is.na(Value))
+# Split the data into train/test set
+X <- data %>% select(-index, -Output, -ID, -Timestamp)
+Y <- data %>% select(Output)
+dims <- dim(data)
+trainX <- X[1:(dims[1]), ] %>% as.matrix()
+trainY <- Y[1:(dims[1]), ] %>% as.matrix()
+testX <- X[(dims[1]/2):dims[1], ] %>% as.matrix()
+testY <- Y[(dims[1]/2):dims[1], ] %>% as.matrix()
+
+```
+Conduct NN prediction
+```{r, quiet=T,message=F}
+library(keras)
+model.NN <- keras_model_sequential()
+hidden_size <- 27
+model.NN %>%
+  layer_dense(units = hidden_size, input_shape = c(ncol(trainX)), activation = 'relu',
+              kernel_initializer='normal') %>%
+  layer_activation_leaky_relu(alpha = 0.1) %>%
+  layer_dense(units = 27, activation = 'relu', kernel_initializer = 'normal') %>%
+  layer_dense(units = 54, activation = 'relu', kernel_initializer = 'normal') %>%
+  layer_dense(units = 27, activation = 'relu', kernel_initializer = 'normal') %>%
+  layer_dense(units = 1, activation = 'relu',  kernel_initializer = 'normal')
+
+summary(model.NN)
+
+# Train the NN model
+model.NN %>% compile(
+  loss = 'mse',
+  optimizer = optimizer_nadam(clipnorm = 10),
+  metrics = c('mse')
+)
+
+history = 
+  model.NN %>% fit(trainX, trainY,
+                   epochs = 100,
+                   batch_size = 25,
+                   shuffle=T
+  )
+model.NN %>% evaluate(testX, testY)
+model.NN %>% get_weights()
+plot(history)
+# mse after NN is 55695.8021
+#RSME is 235.9995
+```
+Conduct a linear model to contrast to Neural network result
+```{r, quiet=T,message=F}
+linear_trainx = trainX%>%as.data.frame()
+lm = lm(data = linear_trainx,Value~ .)
+lm%>%summary()
+linear_testx = testX%>%as.data.frame()
+linear_testy = testY%>%as.data.frame()
+prediction_testy <-predict(lm,linear_testx%>%select(-Value))%>%as.data.frame()
+mseTest<-mean((linear_testy- prediction_testy)^2)
+#mse is 2551249500.93015
+#RSME is 50509
+```
+Conduct L1 regularization to linear regression
+```{r, quiet=T,message=F}
+#glmnet
+lasso = glmnet(x = linear_trainx%>%select(-Value)%>%as.matrix(),y = linear_trainx%>%select(Value)%>%as.matrix(),family = "gaussian" )
+plot(lasso,xvar = c("lambda"),label = TRUE)
+#min lambda is 16.03655
+prediction_lasso_test <-predict(lasso,newx = linear_testx%>%select(-Value)%>%as.matrix(),s = c(16.03655),type = "response")
+mseTestLasso<-mean((prediction_lasso_test - linear_testy)^2)
+#mse is 2547857458.0636
+#RSME is 50476
+```
