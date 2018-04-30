@@ -114,11 +114,8 @@ preprocessData <- function(dat) {
 Clean all the raw data and write all of it to a csv file
 ```{r, quiet=T,message=F}
 # clean process
-cleanedData <- preprocessData(data)
-#write.csv(cleanedData, "cleanedData.csv")
 
-#data.cleaned <- read.csv("cleanedData.csv") %>% select(-X)
-data.cleaned <- cleanedData %>% select(-X)
+data.cleaned <- read.csv("cleanedData.csv") %>% select(-X)
 data.cleaned$Timestamp <- as.POSIXct(data.cleaned$Timestamp)
 ```
 Create basis function to make daily energy consumption into 24 hour period 
