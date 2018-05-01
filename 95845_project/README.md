@@ -1,0 +1,2 @@
+For the raw datasets, we only upload holiday.csv and metadata.csv, because other datasets like train.csv and weather.csv are bigger than 1Gb which is unable to commit.
+If you want these datasets, please send us email to lizhiz@andrew.cmu.edu. We will share them via GoogleDrive.
